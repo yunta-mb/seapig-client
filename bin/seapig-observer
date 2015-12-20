@@ -1,0 +1,18 @@
+#!/bin/env ruby
+
+require 'seapig-client'
+require 'pp'
+
+EM.run {
+	
+	SeapigServer.new(ARGV[0],name: 'observer').slave(ARGV[1]).onchange { |what|
+		puts "-"*80 + " " + Time.new.to_s
+		puts what.version
+		pp what
+		puts
+	}
+
+}
+
+
+

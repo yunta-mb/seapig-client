@@ -2,26 +2,33 @@
 
 require 'websocket-eventmachine-client'
 require 'json'
+require 'jsondiff'
 
 
-class Generator
+class Producer
 
-	@@generators = []
+	@producers_by_regexp = {}
+	@patterns = []
 
-	
-	def self.inherited(klass)
-		@@generators << klass
+	def self.patterns
+		@patterns
 	end
 
+
+	def self.init
+		@producers_by_regexp = Hash[*ObjectSpace.each_object(Class).select { |klass| klass < Producer }.map { |klass| klass.patterns.map { |pattern| [Regexp.new(Regexp.escape(pattern).gsub('\*','.*?')), klass] }}.flatten]
+		@patterns = @producers_by_regexp.values.map { |klass| klass.patterns }.flatten
+	end
 	
+
 	def self.for(object_id)
-		@@generators.find { |generator| generator.handles?(object_id) }
+		@producers_by_regexp.each_pair.find { |pattern,generator| object_id =~ pattern }[1]
 	end
 	
 end
 
 Dir['lib/seapigs/*.rb'].each { |f| require './'+f }
-
+Producer.init
 
 
 EM.run {
@@ -30,21 +37,21 @@ EM.run {
 
 	
 	socket.onopen {
-		socket.send JSON.dump(action: 'worker-register')
+		socket.send(JSON.dump(action: 'client-options-set', options: {name: 'worker'}))
+		Producer.patterns.each { |pattern|
+			socket.send JSON.dump(action: 'object-producer-register', pattern: pattern)
+		}
 	}
 
 	
 	socket.onmessage { |message|
-		#p message
 		message = JSON.load message
 		case message['action']
-		when 'estimate'
-			socket.send JSON.dump(action: 'worker-estimate', id: message['id'], estimate: 0) if Generator.for(message['id'])
-		when 'generate'
+		when 'object-produce'
 			start = Time.new
-			object, version = Generator.for(object_id = message['id']).generate(object_id)
+			object, version = Producer.for(object_id = message['id']).produce(object_id)
 			puts 'Generated %25s in %5.2fs'%[object_id, (Time.new-start).to_f]
-			socket.send JSON.dump(action: 'update', id: object_id, object: object, version: version)
+			socket.send JSON.dump(action: 'object-patch', id: object_id, old_version: 0, new_version: version, value: object)
 		end
 	}
 
