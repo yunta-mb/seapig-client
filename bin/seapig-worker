@@ -27,7 +27,10 @@ class Producer
 	
 end
 
-Dir['lib/seapigs/*.rb'].each { |f| require './'+f }
+($LOAD_PATH+['./lib']).each { |load_path|
+	Dir[load_path+'/seapigs/*.rb'].each { |f| require f }
+}
+
 Producer.init
 
 

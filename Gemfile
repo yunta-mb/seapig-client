@@ -15,4 +15,5 @@ gemspec
 
 gem 'rdoc'
 gem 'hana'
-gem "jsondiff"
+gem 'jsondiff'
+

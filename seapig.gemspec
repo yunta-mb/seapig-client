@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
   s.version     = Seapig::VERSION
   s.authors     = ["yunta"]
   s.email       = ["maciej.blomberg@mikoton.com"]
-  s.homepage    = "http://meh.no"
+  s.homepage    = "https://github.com/yunta-mb/seapig-client"
   s.summary     = "Transient object synchronization lib - client"
   s.description = "meh"
   s.license     = "MIT"
@@ -22,5 +22,7 @@ Gem::Specification.new do |s|
   s.add_dependency "websocket-eventmachine-client"
   s.add_dependency "jsondiff"
   s.add_dependency "hana"
+
+
 
 end

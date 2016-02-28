@@ -120,7 +120,6 @@ class SeapigObject < Hash
 			exit 2
 		end		
 		Hana::Patch.new(message['patch']).apply(self)
-		@shadow = JSON.load(JSON.dump(self))
 		@version = message['new_version']
 		@valid = true
 		@onchange.call(self) if @onchange
