@@ -128,9 +128,10 @@ class SeapigObject < Hash
 
 	def changed
 		old_version = @version
+		old_object = @shadow
 		@version += 1
-		upload(old_version, @shadow)
 		@shadow = sanitized
+		upload(old_version, old_object)	
 	end
 
 
@@ -145,7 +146,7 @@ class SeapigObject < Hash
 			action: 'object-patch',
 			old_version: old_version,
 			new_version: @version,
-			patch: JsonDiff.generate(old_object, self.sanitized)
+			patch: JsonDiff.generate(old_object, @shadow)
 		}
 		@server.socket.send JSON.dump(message)
 	end
