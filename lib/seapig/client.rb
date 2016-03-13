@@ -13,8 +13,29 @@ class SeapigServer
 		@options = options
 		@slave_objects = {}
 		@master_objects = {}
+		
+		connect
+	end
 
-		@socket = WebSocket::EventMachine::Client.connect(uri: uri)
+
+	def connect
+
+		if @socket
+			@socket.onclose {}
+			@socket.close
+		end
+
+		@timeout_timer ||= EM.add_periodic_timer(10) {
+			next if not @socket
+			next if Time.new.to_f - @last_communication_at < 20
+			puts "Seapig ping timeout, reconnecting"
+			connect
+		} 
+		
+		@connected = false
+
+		@last_communication_at = Time.new.to_f
+		@socket = WebSocket::EventMachine::Client.connect(uri: @uri)
 
 		@socket.onopen {
 			@connected = true
@@ -26,6 +47,7 @@ class SeapigServer
 				@socket.send JSON.dump(action: 'object-producer-register', pattern: object_id)
 				object.upload(0, {})
 			}
+			@last_communication_at = Time.new.to_f
 		}
 		
 		@socket.onmessage { |message|
@@ -45,20 +67,32 @@ class SeapigServer
 			else
 				p :wtf, message
 			end
+			@last_communication_at = Time.new.to_f
 		}
 		
 		@socket.onclose { |code, reason|
-			if @connected
-				puts 'Seapig connection died, quitting'
-				EM.stop
-			end
+			puts 'Seapig connection died unexpectedly, reconnecting'
+			connect
 		}
-	end
 
+		@socket.onping {
+			@last_communication_at = Time.new.to_f
+		}
+
+	end
+	
 
 	def disconnect
 		@connected = false
-		@socket.close
+		if @timeout_timer
+			@timeout_timer.cancel
+			@timeout_timer = nil
+		end
+		if @socket
+			@socket.onclose {}
+			@socket.close
+			@socket = nil
+		end
 	end
 
 
