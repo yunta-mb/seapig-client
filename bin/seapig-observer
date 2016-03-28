@@ -7,6 +7,7 @@ EM.run {
 	
 	SeapigServer.new(ARGV[0],name: 'observer').slave(ARGV[1]).onchange { |what|
 		puts "-"*80 + " " + Time.new.to_s
+		puts what.object_id
 		puts what.version
 		pp what
 		puts

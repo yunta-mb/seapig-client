@@ -62,8 +62,9 @@ class SeapigServer
 					object.destroy(message) if object.matches?(message['id'])
 				}
 			when 'object-produce'
-				@master_objects[message['id']].onproduce_proc.call(message['id']) if @master_objects[message['id']].onproduce_proc
-				@master_objects[message['id']].upload(0,{}) if @master_objects[message['id']]
+				handler = @master_objects.keys.find { |key| key.include?('*') and (message['id'] =~ Regexp.new(Regexp.escape(key).gsub('\*','.*?'))) or (message['id'] == key) }
+				@master_objects[handler].onproduce_proc.call(message['id']) if @master_objects[handler].onproduce_proc
+				@master_objects[handler].upload(0,{},message['id']) if @master_objects[handler]
 			else
 				p :wtf, message
 			end
@@ -88,7 +89,7 @@ class SeapigServer
 	
 
 	
-	def disconnect(detach_fd: false)
+	def disconnect(detach_fd = false)
 		@connected = false
 		if @timeout_timer
 			@timeout_timer.cancel
@@ -129,7 +130,7 @@ end
 
 class SeapigObject < Hash
 
-	attr_accessor :version, :object_id, :valid, :onproduce_proc, :stall
+	attr_accessor :version, :object_id, :valid, :onproduce_proc, :stall, :parent, :destroyed
 
 
 	def matches?(id)
@@ -137,7 +138,7 @@ class SeapigObject < Hash
 	end
 
 
-	def initialize(server, object_id)
+	def initialize(server, object_id, parent = nil)
 		@server = server
 		@object_id = object_id
 		@version = 0
@@ -146,6 +147,8 @@ class SeapigObject < Hash
 		@valid = false
 		@shadow = JSON.load(JSON.dump(self))
 		@stall = false
+		@parent = parent
+		@destroyed = false
 	end
 
 	
@@ -194,7 +197,7 @@ class SeapigObject < Hash
 		old_object = @shadow
 		@version += 1
 		@shadow = sanitized
-		upload(old_version, old_object)	
+		upload(old_version, old_object, @object_id)	
 	end
 
 
@@ -203,9 +206,9 @@ class SeapigObject < Hash
 	end
 
 
-	def upload(old_version, old_object)
+	def upload(old_version, old_object, object_id)
 		message = {
-			id: @object_id,
+			id: object_id,
 			action: 'object-patch',
 			old_version: old_version,
 			new_version: @version,
@@ -228,16 +231,18 @@ class SeapigWildcardObject < SeapigObject
 
 
 	def patch(message)
-		self[message['id']] ||= SeapigObject.new(@server, message['id'])
+		self[message['id']] ||= SeapigObject.new(@server, message['id'], self)
 		self[message['id']].patch(message)
 #		puts JSON.dump(self)
-		@onchange.call(self) if @onchange
+		@onchange_proc.call(self[message['id']]) if @onchange_proc
 	end
 
 
 	def destroy(message)
-		self.delete(message['id'])
-		@onchange.call(self) if @onchange
+		if destroyed = self.delete(message['id'])
+			destroyed.destroyed = true
+			@onchange_proc.call(destroyed) if @onchange_proc
+		end
 	end
 
 end
