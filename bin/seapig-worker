@@ -2,6 +2,7 @@
 
 require 'seapig-client'
 
+STDOUT.sync = true
 
 class Producer
 
@@ -31,10 +32,10 @@ EM.run {
 			object = server.master(pattern)
 			object.onproduce { |object_id|
 				start = Time.new
-				puts 'Generating '+object_id
+				print 'Generated  %-30s  '%[object_id]
 				data,version = producer.produce(object_id)
 				object.set(data, version)
-				puts 'Generated %25s in %5.2fs'%[object_id, (Time.new-start).to_f]
+				puts 'in %5.2fs'%[(Time.new-start).to_f]
 			}
 		}
 	}

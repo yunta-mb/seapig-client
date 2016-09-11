@@ -2,18 +2,39 @@ require 'websocket-eventmachine-client'
 require 'json'
 require 'jsondiff'
 require 'hana'
+require 'narray'
+
+
+module WebSocket
+	module Frame
+		class Data < String
+			def getbytes(start_index, count)
+				data = self[start_index, count]
+				if @masking_key
+					payload_na = NArray.to_na(data,"byte")
+					mask_na = NArray.to_na((@masking_key.pack("C*")*((data.size/4) + 1))[0...data.size],"byte")
+					data = (mask_na ^ payload_na).to_s
+				end
+				data
+			end
+		end
+	end
+end
+
+
 
 class SeapigServer
 
-	attr_reader :socket
-	
+	attr_reader :socket, :connected
+
 	def initialize(uri, options={})
 		@connected = false
 		@uri = uri
 		@options = options
 		@slave_objects = {}
 		@master_objects = {}
-		
+		@notifier_objects = {}
+
 		connect
 	end
 
@@ -30,14 +51,15 @@ class SeapigServer
 			next if Time.new.to_f - @last_communication_at < 20
 			puts "Seapig ping timeout, reconnecting"
 			connect
-		} 
-		
+		}
+
 		@connected = false
 
 		@last_communication_at = Time.new.to_f
 		@socket = WebSocket::EventMachine::Client.connect(uri: @uri)
 
 		@socket.onopen {
+			puts 'Connected to seapig server'
 			@connected = true
 			@socket.send JSON.dump(action: 'client-options-set', options: @options)
 			@slave_objects.each_pair { |object_id, object|
@@ -48,7 +70,7 @@ class SeapigServer
 			}
 			@last_communication_at = Time.new.to_f
 		}
-		
+
 		@socket.onmessage { |message|
 			message = JSON.load message
 			#p message['action'], message['id'], message['patch']
@@ -70,15 +92,16 @@ class SeapigServer
 			end
 			@last_communication_at = Time.new.to_f
 		}
-		
+
 		@socket.onclose { |code, reason|
 			puts 'Seapig connection died unexpectedly (code:'+code.inspect+', reason:'+reason.inspect+'), reconnecting in 1s'
-			sleep 1
-			connect
+			EM.add_timer(1) { connect }
 		}
 
 		@socket.onerror { |error|
 			puts 'Seapig error: '+error.inspect
+			@socket.close
+			EM.add_timer(1) { connect }
 		}
 
 		@socket.onping {
@@ -86,9 +109,8 @@ class SeapigServer
 		}
 
 	end
-	
 
-	
+
 	def disconnect(detach_fd = false)
 		@connected = false
 		if @timeout_timer
@@ -110,8 +132,8 @@ class SeapigServer
 	def detach_fd
 		disconnect(true)
 	end
-	
-	
+
+
 	def slave(object_id)
 		object = if object_id.include?('*') then SeapigWildcardObject.new(self, object_id) else SeapigObject.new(self, object_id) end
 		@socket.send JSON.dump(action: 'object-consumer-register', id: object_id, latest_known_version: object.version) if @connected
@@ -121,11 +143,20 @@ class SeapigServer
 
 	def master(object_id)
 		object = SeapigObject.new(self, object_id)
-		object.version = Time.new.to_f
+		object.version = (Time.new.to_f*1000000).to_i
 		@socket.send JSON.dump(action: 'object-producer-register', pattern: object_id) if @connected
 		@master_objects[object_id] = object
 	end
+
+
+	def notifier(object_id)
+		object = SeapigObject.new(self, object_id)
+		object.version = 0
+		@notifier_objects[object_id] = object
+	end
+
 end
+
 
 
 class SeapigObject < Hash
@@ -151,7 +182,7 @@ class SeapigObject < Hash
 		@destroyed = false
 	end
 
-	
+
 	def onchange(&block)
 		@onchange_proc = block
 	end
@@ -161,18 +192,20 @@ class SeapigObject < Hash
 		@onproduce_proc = block
 	end
 
-	
+
 	def patch(message)
-		if not message['old_version']
-			self.clear
-		elsif message['old_version'] == 0
+		if (not message['old_version']) or (message['old_version'] == 0) or (message['value'])
 			self.clear
 		elsif not @version == message['old_version']
 			p @version, message
 			puts "Seapig lost some updates, this should never happen"
 			exit 2
-		end		
-		Hana::Patch.new(message['patch']).apply(self)
+		end
+		if message['value']
+			self.merge!(message['value'])
+		else
+			Hana::Patch.new(message['patch']).apply(self)
+		end
 		@version = message['new_version']
 		@valid = true
 		@onchange_proc.call(self) if @onchange_proc
@@ -191,13 +224,13 @@ class SeapigObject < Hash
 		@version = version
 	end
 
-	
-	def changed
+
+	def changed(new_version=nil)
 		old_version = @version
 		old_object = @shadow
-		@version += 1
+		@version = (new_version or (Time.new.to_f*1000000).to_i)
 		@shadow = sanitized
-		upload(old_version, old_object, @object_id)	
+		upload(old_version, old_object, @object_id)
 	end
 
 
@@ -216,12 +249,16 @@ class SeapigObject < Hash
 		if old_version == 0 or @stall
 			message.merge!(value: (if @stall then false else @shadow end))
 		else
-			message.merge!(patch: JsonDiff.generate(old_object, @shadow))
+			diff = JsonDiff.generate(old_object, @shadow)
+			value = @shadow
+			if JSON.dump(diff.size) < JSON.dump(value.size) #can we afford this?
+				message.merge!(patch: diff)
+			else
+				message.merge!(old_version: 0, value: @shadow)
+			end
 		end
 		@server.socket.send JSON.dump(message)
 	end
-	
-	
 
 end
 

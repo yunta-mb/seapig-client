@@ -22,6 +22,7 @@ Gem::Specification.new do |s|
   s.add_dependency "websocket-eventmachine-client"
   s.add_dependency "jsondiff"
   s.add_dependency "hana"
+  s.add_dependency "narray"
 
 
 
