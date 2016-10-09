@@ -63,10 +63,10 @@ class SeapigServer
 			@connected = true
 			@socket.send JSON.dump(action: 'client-options-set', options: @options)
 			@slave_objects.each_pair { |object_id, object|
-				@socket.send JSON.dump(action: 'object-consumer-register', id: object_id, latest_known_version: object.version)
+				@socket.send JSON.dump(action: 'object-consumer-register', id: object_id, "known-version" => object.version)
 			}
 			@master_objects.each_pair { |object_id, object|
-				@socket.send JSON.dump(action: 'object-producer-register', pattern: object_id)
+				@socket.send JSON.dump(action: 'object-producer-register', pattern: object_id, "known-version" => object.version)
 			}
 			@last_communication_at = Time.new.to_f
 		}
@@ -259,6 +259,7 @@ class SeapigObject < Hash
 		end
 		@server.socket.send JSON.dump(message)
 	end
+
 
 end
 
