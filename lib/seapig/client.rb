@@ -143,7 +143,7 @@ class SeapigServer
 
 	def master(object_id)
 		object = SeapigObject.new(self, object_id)
-		object.version = (Time.new.to_f*1000000).to_i
+		object.version = nil
 		@socket.send JSON.dump(action: 'object-producer-register', pattern: object_id) if @connected
 		@master_objects[object_id] = object
 	end
@@ -151,7 +151,7 @@ class SeapigServer
 
 	def notifier(object_id)
 		object = SeapigObject.new(self, object_id)
-		object.version = 0
+		object.version = nil
 		@notifier_objects[object_id] = object
 	end
 
@@ -259,7 +259,6 @@ class SeapigObject < Hash
 		end
 		@server.socket.send JSON.dump(message)
 	end
-
 
 end
 
