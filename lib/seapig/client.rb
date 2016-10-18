@@ -143,7 +143,6 @@ class SeapigServer
 
 	def master(object_id)
 		object = SeapigObject.new(self, object_id)
-		object.version = nil
 		@socket.send JSON.dump(action: 'object-producer-register', pattern: object_id) if @connected
 		@master_objects[object_id] = object
 	end
