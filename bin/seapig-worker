@@ -9,11 +9,11 @@ class Producer
 	class << self
 		attr_reader :patterns
 	end
-	
+
 	def self.all
 		@producers ||= ObjectSpace.each_object(Class).select { |klass| klass < Producer }
 	end
-	
+
 end
 
 ($LOAD_PATH+['./lib']).each { |load_path|
@@ -30,12 +30,12 @@ EM.run {
 	Producer.all.each { |producer|
 		producer.patterns.each { |pattern|
 			object = server.master(pattern)
-			object.onproduce { |object_id|
+			object.onproduce { |child|
 				start = Time.new
-				print 'Generated  %-30s  '%[object_id]
-				data,version = producer.produce(object_id)
-				object.set(data, version)
-				puts 'in %5.2fs'%[(Time.new-start).to_f]
+				print 'Sent  %-30s  '%[child.object_id]
+				data, version = producer.produce(child.object_id)
+				child.reset.set(data).send(version)
+				puts 'in %5.2fs - %s'%[(Time.new-start).to_f,version.inspect]
 			}
 		}
 	}

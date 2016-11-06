@@ -85,8 +85,8 @@ class SeapigServer
 				}
 			when 'object-produce'
 				handler = @master_objects.keys.find { |key| key.include?('*') and (message['id'] =~ Regexp.new(Regexp.escape(key).gsub('\*','.*?'))) or (message['id'] == key) }
-				@master_objects[handler].onproduce_proc.call(message['id']) if @master_objects[handler].onproduce_proc
-				@master_objects[handler].upload(0,{},message['id']) if @master_objects[handler]
+				raise "Stupid produce" if not @master_objects[handler]
+				@master_objects[handler].produce(message['id'],message['version'])
 			else
 				p :wtf, message
 			end
@@ -142,7 +142,8 @@ class SeapigServer
 
 
 	def master(object_id)
-		object = SeapigObject.new(self, object_id)
+		object = if object_id.include?('*') then SeapigWildcardObject.new(self, object_id) else SeapigObject.new(self, object_id) end
+		object.version = nil
 		@socket.send JSON.dump(action: 'object-producer-register', pattern: object_id) if @connected
 		@master_objects[object_id] = object
 	end
@@ -160,7 +161,8 @@ end
 
 class SeapigObject < Hash
 
-	attr_accessor :version, :object_id, :valid, :onproduce_proc, :stall, :parent, :destroyed
+	attr_accessor :version, :object_id, :stall, :parent, :destroyed, :version_requested
+	attr_reader :received_at
 
 
 	def matches?(id)
@@ -193,6 +195,8 @@ class SeapigObject < Hash
 
 
 	def patch(message)
+		@received_at = Time.new
+		old_data = @shadow
 		if (not message['old_version']) or (message['old_version'] == 0) or (message['value'])
 			self.clear
 		elsif not @version == message['old_version']
@@ -207,24 +211,31 @@ class SeapigObject < Hash
 		end
 		@version = message['new_version']
 		@valid = true
-		@onchange_proc.call(self) if @onchange_proc
+		@shadow = JSON.load(JSON.dump(self))
+		@onchange_proc.call(self) if @onchange_proc and old_data != @shadow
 	end
 
 
-	def set(data, version)
+	def reset()
+		@version = 0
+		@shadow = {}
+		self
+	end
+
+
+	def set(data)
 		if data
 			@stall = false
 			self.clear
 			self.merge!(data)
-			@shadow = sanitized
 		else
 			@stall = true
 		end
-		@version = version
+		self
 	end
 
 
-	def changed(new_version=nil)
+	def send(new_version=nil)
 		old_version = @version
 		old_object = @shadow
 		@version = (new_version or (Time.new.to_f*1000000).to_i)
@@ -257,6 +268,22 @@ class SeapigObject < Hash
 			end
 		end
 		@server.socket.send JSON.dump(message)
+		self
+	end
+
+
+ 	def produce(object_id, version)
+		@version_requested = version
+		if @onproduce_proc
+			@onproduce_proc.call(self)
+		else
+			self.upload(0,{},object_id)
+		end
+	end
+
+
+	def valid?
+		@valid
 	end
 
 end
@@ -265,11 +292,15 @@ end
 
 class SeapigWildcardObject < SeapigObject
 
+	def initialize(*args)
+		super(*args)
+		@children = ObjectSpace::WeakMap.new
+	end
+
 
 	def patch(message)
 		self[message['id']] ||= SeapigObject.new(@server, message['id'], self)
 		self[message['id']].patch(message)
-#		puts JSON.dump(self)
 		@onchange_proc.call(self[message['id']]) if @onchange_proc
 	end
 
@@ -281,6 +312,16 @@ class SeapigWildcardObject < SeapigObject
 		end
 	end
 
+
+	def produce(object_id, version)
+		key = @children.keys.find { |key| key == object_id }
+		child = (@children[(key or object_id)] ||= SeapigObject.new(@server, object_id, self))
+		child.version_requested = version
+		if @onproduce_proc
+			@onproduce_proc.call(child)
+		else
+			child.upload(0,{},object_id)
+		end
+	end
+
 end
-
-
